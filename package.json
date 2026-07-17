@@ -1,0 +1,20 @@
+{
+  "name": "looper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private, read-only ticket viewer for small teams.",
+  "type": "module",
+  "scripts": {
+    "dev": "npx lakebed dev",
+    "build": "npx lakebed build . --target anonymous --out .lakebed/artifacts/app.json",
+    "check": "ultracite check",
+    "format": "ultracite fix",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "lefthook": "^2.1.10",
+    "oxfmt": "^0.59.0",
+    "oxlint": "^1.74.0",
+    "ultracite": "^7.9.4"
+  }
+}
