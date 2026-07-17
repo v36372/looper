@@ -81,27 +81,65 @@ const PRODUCT_CSS = `
   }
 
   .looper-topbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
     gap: 0.85rem 1.25rem;
     margin-bottom: 1.5rem;
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--looper-border);
   }
 
-  @media (min-width: 640px) {
+  @media (min-width: 760px) {
     .looper-topbar {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: baseline;
       margin-bottom: 2rem;
     }
   }
 
   .looper-brand {
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
     min-width: 0;
+  }
+
+  .looper-account {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.45rem 0.75rem;
+    min-width: 0;
+    max-width: 14rem;
+  }
+
+  .looper-account .looper-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .looper-account-button {
+    flex: 0 0 auto;
+    border: 0;
+    padding: 0.2rem 0;
+    color: var(--looper-muted);
+    font-size: 0.75rem;
+    text-transform: lowercase;
+  }
+
+  @media (min-width: 760px) {
+    .looper-account {
+      grid-column: 3;
+      max-width: 22rem;
+    }
   }
 
   .looper-title {
@@ -246,8 +284,9 @@ const PRODUCT_CSS = `
   }
 
   .looper-project-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
     display: flex;
-    flex: 1 1 12rem;
     flex-wrap: wrap;
     align-items: baseline;
     justify-content: flex-start;
@@ -260,8 +299,10 @@ const PRODUCT_CSS = `
     padding-bottom: 0.15rem;
   }
 
-  @media (min-width: 640px) {
+  @media (min-width: 760px) {
     .looper-project-nav {
+      grid-column: 2;
+      grid-row: 1;
       justify-content: flex-end;
     }
   }
@@ -506,9 +547,11 @@ const useWebTuiStylesheet = () => {
 };
 
 const Shell = ({
+  account,
   children,
   nav,
 }: {
+  account?: ComponentChildren;
   children: ComponentChildren;
   nav?: ComponentChildren;
 }) => (
@@ -521,9 +564,27 @@ const Shell = ({
           <p className="looper-subtitle">private ticket viewer</p>
         </div>
         {nav}
+        {account}
       </header>
       <main>{children}</main>
     </div>
+  </div>
+);
+
+const AccountControl = ({ email }: { email: string | null }) => (
+  <div className="looper-account">
+    {email ? (
+      <p className="looper-meta" title={`signed in as ${email}`}>
+        signed in as <span>{email}</span>
+      </p>
+    ) : null}
+    <button
+      className="looper-button looper-account-button"
+      type="button"
+      onClick={() => signOut()}
+    >
+      sign out
+    </button>
   </div>
 );
 
@@ -553,34 +614,16 @@ const SignedOutState = () => (
   </section>
 );
 
-const AccessDeniedState = ({ email }: { email: string | null }) => (
+const AccessDeniedState = () => (
   <section className="looper-panel" aria-labelledby="looper-denied-heading">
     <p className="looper-kicker" id="looper-denied-heading">
       access denied
     </p>
-    <div className="looper-stack">
-      <p className="looper-copy">
-        This account is not on the Looper allowlist.
-      </p>
-      {email ? (
-        <p className="looper-meta">
-          signed in as <span>{email}</span>
-        </p>
-      ) : null}
-      <div className="looper-actions">
-        <button
-          className="looper-button"
-          type="button"
-          onClick={() => signOut()}
-        >
-          Sign out
-        </button>
-      </div>
-    </div>
+    <p className="looper-copy">This account is not on the Looper allowlist.</p>
   </section>
 );
 
-const EmptyBoardState = ({ email }: { email: string | null }) => (
+const EmptyBoardState = () => (
   <section
     className="looper-panel"
     aria-labelledby="looper-empty-board-heading"
@@ -588,24 +631,8 @@ const EmptyBoardState = ({ email }: { email: string | null }) => (
     <p className="looper-kicker" id="looper-empty-board-heading">
       board
     </p>
-    <div className="looper-stack">
-      {email ? (
-        <p className="looper-meta">
-          signed in as <span>{email}</span>
-        </p>
-      ) : null}
-      <div className="looper-empty" role="status">
-        No projects in the current snapshot.
-      </div>
-      <div className="looper-actions">
-        <button
-          className="looper-button"
-          type="button"
-          onClick={() => signOut()}
-        >
-          Sign out
-        </button>
-      </div>
+    <div className="looper-empty" role="status">
+      No projects in the current snapshot.
     </div>
   </section>
 );
@@ -741,13 +768,7 @@ const ProjectSelector = ({
   </nav>
 );
 
-const ProjectBoard = ({
-  email,
-  project,
-}: {
-  email: string | null;
-  project: BoardProject;
-}) => (
+const ProjectBoard = ({ project }: { project: BoardProject }) => (
   <section aria-labelledby="looper-project-heading" className="looper-panel">
     <div className="looper-board-header">
       <div>
@@ -755,20 +776,6 @@ const ProjectBoard = ({
         <h2 className="looper-project-name" id="looper-project-heading">
           {project.name}
         </h2>
-      </div>
-      <div className="looper-actions">
-        {email ? (
-          <p className="looper-meta">
-            signed in as <span>{email}</span>
-          </p>
-        ) : null}
-        <button
-          className="looper-button"
-          type="button"
-          onClick={() => signOut()}
-        >
-          Sign out
-        </button>
       </div>
     </div>
 
@@ -841,9 +848,11 @@ const AuthorizedBoard = ({ email }: { email: string | null }) => {
 
   // While the authorized board query is still resolving, show a quiet loading
   // shell and never invent ticket content.
+  const account = <AccountControl email={email} />;
+
   if (!projects) {
     return (
-      <Shell>
+      <Shell account={account}>
         <LoadingState label="Loading board…" />
       </Shell>
     );
@@ -852,8 +861,8 @@ const AuthorizedBoard = ({ email }: { email: string | null }) => {
   // Empty board: agreed message only — no project selector or controls.
   if (projects.length === 0) {
     return (
-      <Shell>
-        <EmptyBoardState email={email} />
+      <Shell account={account}>
+        <EmptyBoardState />
       </Shell>
     );
   }
@@ -861,14 +870,15 @@ const AuthorizedBoard = ({ email }: { email: string | null }) => {
   const selectedProject = resolveSelectedProject(projects, selectedSlug);
   if (!selectedProject) {
     return (
-      <Shell>
-        <EmptyBoardState email={email} />
+      <Shell account={account}>
+        <EmptyBoardState />
       </Shell>
     );
   }
 
   return (
     <Shell
+      account={account}
       nav={
         <ProjectSelector
           projects={projects}
@@ -877,7 +887,7 @@ const AuthorizedBoard = ({ email }: { email: string | null }) => {
         />
       }
     >
-      <ProjectBoard email={email} project={selectedProject} />
+      <ProjectBoard project={selectedProject} />
     </Shell>
   );
 };
@@ -914,8 +924,8 @@ const SessionGate = () => {
 
   if (session.access === "denied") {
     return (
-      <Shell>
-        <AccessDeniedState email={session.email} />
+      <Shell account={<AccountControl email={session.email} />}>
+        <AccessDeniedState />
       </Shell>
     );
   }
