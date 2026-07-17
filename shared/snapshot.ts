@@ -9,6 +9,7 @@ export const PROJECT_SLUG_MAX = 48;
 export const PROJECT_NAME_MAX = 80;
 export const TICKET_KEY_MAX = 32;
 export const TICKET_TITLE_MAX = 240;
+export const TICKET_DESCRIPTION_MAX = 4000;
 export const TAG_MAX = 32;
 
 export const TICKET_STATUSES = [
@@ -22,6 +23,7 @@ export const TICKET_STATUSES = [
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
 export interface TicketInput {
+  description: string;
   key: string;
   status: TicketStatus;
   tags: string[];
@@ -40,6 +42,7 @@ export interface SnapshotInput {
 }
 
 export interface BoardTicket {
+  description: string;
   key: string;
   status: TicketStatus;
   tags: string[];
@@ -76,6 +79,14 @@ export type SnapshotValidationResult =
       ok: false;
     };
 
+export type FieldValidationResult<T> =
+  | { ok: true; value: T }
+  | {
+      category: "malformed" | "invalid";
+      message: string;
+      ok: false;
+    };
+
 const STATUS_SET = new Set<string>(TICKET_STATUSES);
 
 export const STATUS_LABELS: Record<TicketStatus, string> = {
@@ -92,6 +103,17 @@ export const statusLabel = (status: TicketStatus): string =>
 export const orderKeyFromIndex = (index: number): string =>
   String(index).padStart(6, "0");
 
+export const nextOrderKey = (existingKeys: readonly string[]): string => {
+  let max = -1;
+  for (const key of existingKeys) {
+    const parsed = Math.trunc(Number(key));
+    if (Number.isFinite(parsed) && parsed > max) {
+      max = parsed;
+    }
+  }
+  return orderKeyFromIndex(max + 1);
+};
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -99,6 +121,15 @@ const invalid = (
   category: Exclude<SnapshotValidationCategory, "ok">,
   message: string
 ): SnapshotValidationResult => ({
+  category,
+  message,
+  ok: false,
+});
+
+const fieldInvalid = <T>(
+  category: "malformed" | "invalid",
+  message: string
+): FieldValidationResult<T> => ({
   category,
   message,
   ok: false,
@@ -118,6 +149,129 @@ export const parseTagsJson = (raw: string): string[] => {
 
 export const encodeTagsJson = (tags: readonly string[]): string =>
   JSON.stringify(tags);
+
+export const normalizeDescription = (raw: unknown): string => {
+  if (raw === undefined || raw === null) {
+    return "";
+  }
+  if (typeof raw !== "string") {
+    return "";
+  }
+  return raw.trim();
+};
+
+export const validateProjectSlug = (
+  raw: unknown,
+  label = "Project slug"
+): FieldValidationResult<string> => {
+  if (typeof raw !== "string") {
+    return fieldInvalid("malformed", `${label} must be a string.`);
+  }
+
+  const slug = raw.trim();
+  if (
+    slug.length < 1 ||
+    slug.length > PROJECT_SLUG_MAX ||
+    !PROJECT_SLUG_PATTERN.test(slug)
+  ) {
+    return fieldInvalid("invalid", `${label} is invalid.`);
+  }
+
+  return { ok: true, value: slug };
+};
+
+export const validateProjectName = (
+  raw: unknown,
+  label = "Project name"
+): FieldValidationResult<string> => {
+  if (typeof raw !== "string") {
+    return fieldInvalid("malformed", `${label} must be a string.`);
+  }
+
+  const name = raw.trim();
+  if (name.length < 1 || name.length > PROJECT_NAME_MAX) {
+    return fieldInvalid("invalid", `${label} is invalid.`);
+  }
+
+  return { ok: true, value: name };
+};
+
+export const validateTicketKey = (
+  raw: unknown,
+  label = "Ticket key"
+): FieldValidationResult<string> => {
+  if (typeof raw !== "string") {
+    return fieldInvalid("malformed", `${label} must be a string.`);
+  }
+
+  const key = raw.trim();
+  if (key.length < 1 || key.length > TICKET_KEY_MAX) {
+    return fieldInvalid("invalid", `${label} is invalid.`);
+  }
+
+  return { ok: true, value: key };
+};
+
+export const validateTicketTitle = (
+  raw: unknown,
+  label = "Ticket title"
+): FieldValidationResult<string> => {
+  if (typeof raw !== "string") {
+    return fieldInvalid("malformed", `${label} must be a string.`);
+  }
+
+  const title = raw.trim();
+  if (title.length < 1 || title.length > TICKET_TITLE_MAX) {
+    return fieldInvalid("invalid", `${label} is invalid.`);
+  }
+
+  return { ok: true, value: title };
+};
+
+export const validateTicketStatus = (
+  raw: unknown,
+  label = "Ticket status"
+): FieldValidationResult<TicketStatus> => {
+  if (typeof raw !== "string") {
+    return fieldInvalid("malformed", `${label} must be a string.`);
+  }
+
+  if (!STATUS_SET.has(raw)) {
+    return fieldInvalid("invalid", `${label} is invalid.`);
+  }
+
+  return { ok: true, value: raw as TicketStatus };
+};
+
+export const validateTicketDescription = (
+  raw: unknown,
+  { required = false }: { required?: boolean } = {}
+): FieldValidationResult<string> => {
+  if (raw === undefined) {
+    if (required) {
+      return fieldInvalid("malformed", "Ticket description is required.");
+    }
+    return { ok: true, value: "" };
+  }
+
+  if (raw === null) {
+    return { ok: true, value: "" };
+  }
+
+  if (typeof raw !== "string") {
+    return fieldInvalid("malformed", "Ticket description must be a string.");
+  }
+
+  const description = raw.trim();
+  if (description.length > TICKET_DESCRIPTION_MAX) {
+    return fieldInvalid(
+      "invalid",
+      `Ticket description must be at most ${TICKET_DESCRIPTION_MAX} characters.`
+    );
+  }
+
+  return { ok: true, value: description };
+};
 
 const validateTags = (
   tagsRaw: unknown[],
@@ -208,9 +362,21 @@ const validateTicket = (
     );
   }
 
+  if (
+    ticketRaw.description !== undefined &&
+    ticketRaw.description !== null &&
+    typeof ticketRaw.description !== "string"
+  ) {
+    return invalid(
+      "malformed",
+      `Ticket description at project ${projectIndex}, index ${ticketIndex} must be a string.`
+    );
+  }
+
   const key = ticketRaw.key.trim();
   const title = ticketRaw.title.trim();
   const { status } = ticketRaw;
+  const description = normalizeDescription(ticketRaw.description);
 
   if (key.length < 1 || key.length > TICKET_KEY_MAX) {
     return invalid(
@@ -234,6 +400,13 @@ const validateTicket = (
     );
   }
 
+  if (description.length > TICKET_DESCRIPTION_MAX) {
+    return invalid(
+      "invalid",
+      `Ticket description at project ${projectIndex}, index ${ticketIndex} is invalid.`
+    );
+  }
+
   if (!STATUS_SET.has(status)) {
     return invalid(
       "invalid",
@@ -253,6 +426,7 @@ const validateTicket = (
   }
 
   return {
+    description,
     key,
     status: status as TicketStatus,
     tags: tagsResult,
@@ -409,3 +583,5 @@ export const validateSnapshot = (raw: unknown): SnapshotValidationResult => {
     ticketCount,
   };
 };
+
+export const isPlainJsonObject = isPlainObject;

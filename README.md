@@ -1,6 +1,6 @@
 # Looper
 
-Private, read-only ticket viewer for small teams. Another workload prepares a complete ordered snapshot; Looper displays it in a refined terminal-inspired interface and pushes committed changes to authorized viewers.
+Private ticket viewer for small teams. External workloads prepare and maintain an ordered board; Looper displays it in a refined terminal-inspired interface and pushes committed changes to authorized viewers. Operators can replace the complete snapshot or mutate individual projects and tickets through bearer-authenticated endpoints. The UI itself remains non-editing.
 
 This guide is for operators who need to configure, deploy, feed, and verify Looper without reading implementation internals. Product and technical detail lives in [`SPEC.md`](./SPEC.md).
 
@@ -9,7 +9,7 @@ This guide is for operators who need to configure, deploy, feed, and verify Loop
 - Node.js 20+ and npm
 - Network access to Lakebed (`api.lakebed.dev`) for hosted deploys
 - A Google account for Lakebed CLI authentication and for viewer sign-in
-- An external workload (or `curl`) that can `PUT` JSON to the ingestion endpoint
+- An external workload (or `curl`) that can call the snapshot and incremental CRUD endpoints
 
 ## Quick start (local)
 
@@ -65,7 +65,7 @@ Expected result on a clean tree: `check` and `build` both exit 0.
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `ALLOWED_EMAILS` | yes | Comma-separated Google emails allowed to view the board |
-| `INGEST_TOKEN` | yes | Bearer token for `PUT /api/v1/snapshot` |
+| `INGEST_TOKEN` | yes | Bearer token for snapshot and incremental CRUD endpoints |
 
 Template: [`.env.lakebed.server.example`](./.env.lakebed.server.example)
 
@@ -143,12 +143,11 @@ npx lakebed token create --name looper-ci
 # Supply the returned secret once as LAKEBED_TOKEN in CI.
 ```
 
-## Ingestion API
+## Operator write API
 
-### Endpoint
+All write endpoints share the same bearer secret:
 
 ```http
-PUT /api/v1/snapshot
 Authorization: Bearer <INGEST_TOKEN>
 Content-Type: application/json
 ```
@@ -156,7 +155,13 @@ Content-Type: application/json
 Local example base URL: `http://localhost:3000`  
 Hosted example base URL: `https://<your-subdomain>.lakebed.app` or the deploy URL printed by `npx lakebed deploy`.
 
-### Valid complete snapshot (copyable)
+Lakebed matches endpoint paths exactly, so resource identity lives in the JSON body rather than `/projects/:slug` style routes.
+
+### Complete snapshot replacement
+
+```http
+PUT /api/v1/snapshot
+```
 
 Save as `snapshot.example.json` or pipe inline:
 
@@ -172,6 +177,7 @@ Save as `snapshot.example.json` or pipe inline:
           "key": "LOOP-1",
           "title": "Prepare operator deployment docs",
           "status": "in_review",
+          "description": "Docs should cover claim, env sync, and smoke checks.",
           "tags": ["docs", "ops"]
         },
         {
@@ -190,6 +196,7 @@ Save as `snapshot.example.json` or pipe inline:
           "key": "PLAT-9",
           "title": "Rotate ingest token after first deploy",
           "status": "needs_human",
+          "description": "",
           "tags": ["security"]
         },
         {
@@ -216,13 +223,15 @@ Constraints (rejected entirely on failure):
 - Project `name`: 1–80 visible characters after trim
 - Ticket `key`: 1–32 chars after trim, unique within its project
 - Ticket `title`: 1–240 chars after trim
+- Ticket `description`: optional; at most 4000 chars after trim; omit or blank stores as empty
 - Status one of: `open`, `in_progress`, `in_review`, `needs_human`, `done`
 - At most 8 tags per ticket; each tag 1–32 chars; no case-insensitive duplicates
-- Array order is canonical for projects, tickets, and tags
+- Tags remain accepted for complete snapshots for compatibility, but the viewer no longer renders them
+- Array order is canonical for projects and tickets
 
 An empty `projects` array is valid and clears the board.
 
-### Bearer-authenticated ingestion (copyable)
+### Bearer-authenticated complete snapshot (copyable)
 
 ```sh
 # Local
@@ -257,22 +266,133 @@ curl -sS -X PUT "http://localhost:3000/api/v1/snapshot" \
   -d '{"version":1,"projects":[]}'
 ```
 
+### Incremental project CRUD (copyable)
+
+Append a project after existing ones:
+
+```sh
+curl -sS -X POST "http://localhost:3000/api/v1/projects" \
+  -H "Authorization: Bearer ${INGEST_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"ops","name":"Ops"}'
+```
+
+`201` success:
+
+```json
+{
+  "ok": true,
+  "slug": "ops",
+  "name": "Ops"
+}
+```
+
+Rename a project:
+
+```sh
+curl -sS -X PATCH "http://localhost:3000/api/v1/projects" \
+  -H "Authorization: Bearer ${INGEST_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"ops","name":"Operations"}'
+```
+
+Delete a project and all of its tickets atomically:
+
+```sh
+curl -sS -X DELETE "http://localhost:3000/api/v1/projects" \
+  -H "Authorization: Bearer ${INGEST_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"ops"}'
+```
+
+### Incremental ticket CRUD (copyable)
+
+Append a ticket after existing tickets in a project:
+
+```sh
+curl -sS -X POST "http://localhost:3000/api/v1/tickets" \
+  -H "Authorization: Bearer ${INGEST_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projectSlug": "looper",
+    "key": "LOOP-3",
+    "title": "Add expandable ticket details",
+    "status": "in_progress",
+    "description": "Show description and status when a row is activated."
+  }'
+```
+
+`201` success:
+
+```json
+{
+  "ok": true,
+  "projectSlug": "looper",
+  "key": "LOOP-3",
+  "title": "Add expandable ticket details",
+  "status": "in_progress",
+  "description": "Show description and status when a row is activated."
+}
+```
+
+Update one or more ticket fields (at least one of `title`, `status`, `description`):
+
+```sh
+curl -sS -X PATCH "http://localhost:3000/api/v1/tickets" \
+  -H "Authorization: Bearer ${INGEST_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projectSlug": "looper",
+    "key": "LOOP-3",
+    "status": "done",
+    "description": "Shipped with accessible expand/collapse."
+  }'
+```
+
+Clear a description by sending an empty string:
+
+```sh
+curl -sS -X PATCH "http://localhost:3000/api/v1/tickets" \
+  -H "Authorization: Bearer ${INGEST_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projectSlug": "looper",
+    "key": "LOOP-3",
+    "description": ""
+  }'
+```
+
+Delete a ticket:
+
+```sh
+curl -sS -X DELETE "http://localhost:3000/api/v1/tickets" \
+  -H "Authorization: Bearer ${INGEST_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "projectSlug": "looper",
+    "key": "LOOP-3"
+  }'
+```
+
 ### Response codes and recovery
 
 | Status | Meaning | Operator recovery |
 | --- | --- | --- |
-| `200` | Snapshot committed; counts returned | None. Connected authorized clients update live. |
-| `400` | Malformed JSON or invalid request shape (wrong version, missing fields, wrong types) | Fix the payload structure. Previous snapshot remains. |
-| `401` | Missing/invalid bearer token, or `INGEST_TOKEN` unset | Confirm `Authorization: Bearer …` matches `.env.lakebed.server`. Redeploy after fixing env on hosted. Previous snapshot remains. |
-| `413` | More than 10 projects or 500 tickets | Split or reduce the snapshot. Previous snapshot remains. |
-| `422` | Structurally valid JSON with invalid/duplicate values (slug, status, tags, uniqueness, lengths) | Fix the reported validation message. Previous snapshot remains. |
-| `500` | Unexpected server/storage failure | Retry once. Inspect `npx lakebed logs`. Previous snapshot remains if the transaction did not commit. |
+| `200` | Snapshot/update/delete committed | None. Connected authorized clients update live. |
+| `201` | Project or ticket created and appended | None. New row appears after existing records. |
+| `400` | Malformed JSON or invalid request shape (wrong version, missing fields, wrong types) | Fix the payload structure. Previous board remains. |
+| `401` | Missing/invalid bearer token, or `INGEST_TOKEN` unset | Confirm `Authorization: Bearer …` matches `.env.lakebed.server`. Redeploy after fixing env on hosted. Previous board remains. |
+| `404` | Referenced project or ticket does not exist | Create the parent project first, or correct the slug/key. Previous board remains. |
+| `409` | Duplicate project slug or ticket key | Choose a unique slug/key or update the existing record. Previous board remains. |
+| `413` | More than 10 projects or 500 tickets | Reduce the board or split work. Previous board remains. |
+| `422` | Structurally valid JSON with invalid values (slug, status, lengths, etc.) | Fix the reported validation message. Previous board remains. |
+| `500` | Unexpected server/storage failure | Retry once. Inspect `npx lakebed logs`. Previous board remains if the transaction did not commit. |
 
-Failed ingestion never partially replaces the board and publishes no live update.
+Failed writes never partially replace the board and publish no live update.
 
-### Ingestion logging
+### Write logging
 
-Successful commits log outcome plus project and ticket counts only. Rejections log outcome and validation category (`unauthorized`, `malformed`, `too_large`, `invalid`, `server_error`). Logs must not include the bearer token or the full snapshot body.
+Successful commits log outcome plus safe identifiers/counts only. Rejections log outcome and validation category (`unauthorized`, `malformed`, `too_large`, `invalid`, `not_found`, `conflict`, `server_error`). Logs must not include the bearer token or full request bodies.
 
 Inspect:
 
@@ -297,7 +417,8 @@ Run after local setup or a hosted deploy. Check each box before sharing the URL.
 ### Board states
 
 - [ ] **Empty board:** ingest `{"version":1,"projects":[]}` → authorized viewer sees `No projects in the current snapshot.` and no project selector.
-- [ ] **Populated board:** ingest the sample snapshot above → first project selected; tickets show key, title, tags, and status labels `OPEN` / `IN PROGRESS` / `IN REVIEW` / `NEEDS HUMAN` / `DONE`.
+- [ ] **Populated board:** ingest the sample snapshot above → first project selected; tickets show key, title, and status labels `OPEN` / `IN PROGRESS` / `IN REVIEW` / `NEEDS HUMAN` / `DONE`. Tags do not render.
+- [ ] **Ticket details:** activate a ticket row → expanded region shows status and description (or `No description.`); activate again → collapses.
 - [ ] **Empty project:** select `Inbox` → `No tickets in this project.`
 - [ ] **Project switching:** activate another project control → ticket list changes; browser URL does not.
 
@@ -305,20 +426,22 @@ Run after local setup or a hosted deploy. Check each box before sharing the URL.
 
 - [ ] Keep an authorized tab open on project `looper`.
 - [ ] Ingest a modified snapshot that still includes `looper` → the open tab updates without manual refresh; selection stays on `looper`.
+- [ ] Append a ticket with `POST /api/v1/tickets` → open tab receives the new last row without refresh.
 - [ ] Ingest a snapshot that removes `looper` → selection falls back to the first remaining project.
-- [ ] Send a deliberately invalid or unauthorized ingest → open tab unchanged.
+- [ ] Send a deliberately invalid or unauthorized write → open tab unchanged.
 
-### Ingestion failures
+### Write failures
 
 - [ ] Missing `Authorization` header → `401`; board unchanged.
-- [ ] Body `{ "version": 2, "projects": [] }` → `400`; board unchanged.
-- [ ] Duplicate project slug or bad status → `422`; board unchanged.
-- [ ] 11 projects → `413`; board unchanged.
+- [ ] Body `{ "version": 2, "projects": [] }` on snapshot → `400`; board unchanged.
+- [ ] Duplicate project slug or bad status → `409`/`422`; board unchanged.
+- [ ] 11 projects via snapshot or create → `413`; board unchanged.
+- [ ] Ticket create against missing project → `404`; board unchanged.
 
 ### Presentation sanity
 
 - [ ] Usable at ~360 px width and on a wide desktop.
-- [ ] Keyboard can reach project controls, sign-in/out, and retry (when shown); focus rings are visible.
+- [ ] Keyboard can reach project controls, ticket rows, sign-in/out, and retry (when shown); focus rings are visible.
 - [ ] Status remains readable if color is ignored (labels differ by text).
 
 ## Secret rotation
@@ -328,7 +451,7 @@ Run after local setup or a hosted deploy. Check each box before sharing the URL.
 1. Generate a new token: `openssl rand -hex 32`.
 2. Update `.env.lakebed.server` with the new value.
 3. Redeploy so hosted env replaces the previous token: `npx lakebed deploy`.
-4. Update every ingestion workload with the new bearer value.
+4. Update every snapshot/CRUD workload with the new bearer value.
 5. Confirm old token returns `401` and the new token commits successfully.
 6. Treat the old token as compromised; do not log either value.
 
@@ -347,14 +470,15 @@ Operators should know these deliberate tradeoffs before relying on Looper in pro
 
 1. **Email-based authorization** — access is gated by verified Google email matching `ALLOWED_EMAILS`, not by immutable user IDs. Simpler to operate; weaker if an email is recycled or spoofed at the identity provider.
 2. **Pinned CDN styling** — WebTUI CSS loads from a pinned jsDelivr URL. Decorative styling can fail without exposing or corrupting board data, but presentation then falls back to product CSS only.
-3. **Complete snapshot replacement** — every successful ingest deletes and rewrites the full board. Ideal at ≤10 projects / ≤500 tickets; a bad-but-valid snapshot immediately replaces the previous state with no history or rollback.
-4. **Lakebed alpha hosting** — APIs, limits, availability, and pricing may change. Claimed deploys are required for server env; unclaimed anonymous deploys expire.
+3. **Complete snapshot replacement** — bulk sync deletes and rewrites the full board. Ideal at ≤10 projects / ≤500 tickets; a bad-but-valid snapshot immediately replaces the previous state with no history or rollback. Incremental CRUD exists for trusted scripts that should not rewrite everything.
+4. **Exact-path CRUD routes** — Lakebed endpoint matching is exact, so project/ticket identity is sent in JSON bodies rather than nested URL params.
+5. **Lakebed alpha hosting** — APIs, limits, availability, and pricing may change. Claimed deploys are required for server env; unclaimed anonymous deploys expire.
 
 ## Repository layout
 
 ```text
 client/index.tsx          # Preact UI
-server/index.ts           # schema, queries, ingestion endpoint
+server/index.ts           # schema, queries, snapshot + CRUD endpoints
 shared/                   # pure shared types and validation
 favicon.svg
 .env.lakebed.server       # untracked secrets (local + deploy source)
@@ -377,16 +501,16 @@ README.md                 # this operator guide
 | `npx lakebed auth login` | Authenticate the Lakebed CLI |
 | `npx lakebed auth status` | Show CLI authentication state |
 | `npx lakebed domains add <name>.lakebed.app` | Reserve a Lakebed subdomain |
-| `npx lakebed logs [--port 3000 \| <deploy>]` | Inspect ingestion and runtime logs |
+| `npx lakebed logs [--port 3000 \| <deploy>]` | Inspect write and runtime logs |
 | `npx lakebed db dump [--port 3000 \| <deploy>]` | Inspect stored projects/tickets |
 
 ## Deployment readiness checklist
 
 - [x] Safe env template without real credentials
 - [x] Operator docs for local dev, checks, build, claim, env sync, subdomain
-- [x] Copyable snapshot and `curl` ingestion examples
-- [x] Documented HTTP recovery paths for auth/validation/size/server errors
-- [x] Smoke checklist for access, empty/populated board, switching, live updates
+- [x] Copyable snapshot and incremental CRUD `curl` examples
+- [x] Documented HTTP recovery paths for auth/validation/size/not-found/conflict/server errors
+- [x] Smoke checklist for access, empty/populated board, ticket details, switching, live updates
 - [x] Secret rotation and email revocation procedures
 - [x] Logging contract: outcomes and counts only
 - [x] Accepted risks called out for operators

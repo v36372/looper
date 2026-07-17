@@ -193,7 +193,8 @@ const PRODUCT_CSS = `
 
   .looper-button:focus-visible,
   .looper-sign-in:focus-visible,
-  .looper-project-link:focus-visible {
+  .looper-project-link:focus-visible,
+  .looper-ticket-toggle:focus-visible {
     outline: 2px solid var(--looper-focus);
     outline-offset: 2px;
   }
@@ -318,7 +319,24 @@ const PRODUCT_CSS = `
   .looper-ticket {
     border: 1px solid var(--looper-border);
     background: color-mix(in srgb, var(--looper-panel) 80%, black);
+  }
+
+  .looper-ticket-toggle {
+    appearance: none;
+    display: block;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
     padding: 0.85rem 0.9rem;
+    cursor: pointer;
+  }
+
+  .looper-ticket-toggle:hover {
+    background: color-mix(in srgb, var(--looper-panel) 70%, white 4%);
   }
 
   .looper-ticket-main {
@@ -334,10 +352,26 @@ const PRODUCT_CSS = `
     gap: 0.45rem;
   }
 
+  .looper-ticket-key-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.45rem 0.85rem;
+  }
+
   .looper-ticket-key {
     margin: 0;
     color: var(--looper-muted);
     font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .looper-ticket-expand-hint {
+    margin: 0;
+    color: var(--looper-faint);
+    font-size: 0.7rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
@@ -349,27 +383,6 @@ const PRODUCT_CSS = `
     font-weight: 500;
     line-height: 1.45;
     overflow-wrap: anywhere;
-  }
-
-  .looper-tag-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .looper-tag {
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--looper-border);
-    color: var(--looper-muted);
-    background: transparent;
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 0.18rem 0.45rem;
   }
 
   .looper-status {
@@ -399,6 +412,44 @@ const PRODUCT_CSS = `
 
   .looper-status[data-status="done"] {
     color: var(--looper-status-done);
+  }
+
+  .looper-ticket-details {
+    border-top: 1px solid var(--looper-border);
+    margin: 0;
+    padding: 0.85rem 0.9rem 0.95rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+  }
+
+  .looper-ticket-detail-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .looper-ticket-detail-label {
+    margin: 0;
+    color: var(--looper-faint);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .looper-ticket-description {
+    margin: 0;
+    color: var(--looper-text);
+    font-size: 0.875rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .looper-ticket-description[data-empty="true"] {
+    color: var(--looper-muted);
+    font-style: italic;
   }
 
   /* Status sits under the title on narrow screens; right-aligned on wider ones. */
@@ -601,30 +652,62 @@ const QueryErrorState = ({
 
 const TicketRow = ({ ticket }: { ticket: BoardTicket }) => {
   const status = ticket.status as TicketStatus;
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = `ticket-details-${ticket.key}`;
+  const description =
+    typeof ticket.description === "string" ? ticket.description.trim() : "";
+  const hasDescription = description.length > 0;
 
   return (
     <li className="looper-ticket">
-      <article aria-label={ticket.key} className="looper-ticket-main">
-        <div className="looper-ticket-body">
-          <p className="looper-ticket-key">{ticket.key}</p>
-          <h3 className="looper-ticket-title">{ticket.title}</h3>
-          {ticket.tags.length > 0 ? (
-            <ul aria-label="Tags" className="looper-tag-list">
-              {ticket.tags.map((tag) => (
-                <li className="looper-tag" key={`${ticket.key}:${tag}`}>
-                  <span is-="badge" variant-="background0">
-                    {tag}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+      <button
+        aria-controls={detailsId}
+        aria-expanded={expanded}
+        className="looper-ticket-toggle"
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <article aria-label={ticket.key} className="looper-ticket-main">
+          <div className="looper-ticket-body">
+            <div className="looper-ticket-key-row">
+              <p className="looper-ticket-key">{ticket.key}</p>
+              <p className="looper-ticket-expand-hint">
+                {expanded ? "collapse" : "details"}
+              </p>
+            </div>
+            <h3 className="looper-ticket-title">{ticket.title}</h3>
+          </div>
+          {/* Sibling of body: stacks under title on narrow screens, right column on wide. */}
+          <p className="looper-status" data-status={status}>
+            {statusLabel(status)}
+          </p>
+        </article>
+      </button>
+
+      {expanded ? (
+        <div
+          className="looper-ticket-details"
+          id={detailsId}
+          role="region"
+          aria-label={`${ticket.key} details`}
+        >
+          <div className="looper-ticket-detail-block">
+            <p className="looper-ticket-detail-label">Status</p>
+            <p className="looper-status" data-status={status}>
+              {statusLabel(status)}
+            </p>
+          </div>
+          <div className="looper-ticket-detail-block">
+            <p className="looper-ticket-detail-label">Description</p>
+            <p
+              className="looper-ticket-description"
+              data-empty={hasDescription ? "false" : "true"}
+            >
+              {hasDescription ? description : "No description."}
+            </p>
+          </div>
         </div>
-        {/* Sibling of body: stacks under title on narrow screens, right column on wide. */}
-        <p className="looper-status" data-status={status}>
-          {statusLabel(status)}
-        </p>
-      </article>
+      ) : null}
     </li>
   );
 };
