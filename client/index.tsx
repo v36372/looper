@@ -427,11 +427,19 @@ const PRODUCT_CSS = `
   }
 
   .looper-status {
+    display: inline-flex;
+    width: max-content;
+    align-items: center;
+    justify-content: center;
     margin: 0;
-    font-size: 0.75rem;
+    border: 1px solid currentColor;
+    background: color-mix(in srgb, currentColor 7%, transparent);
+    color: var(--looper-muted);
+    padding: 0.18rem 0.45rem;
+    font-size: 0.7rem;
+    line-height: 1.2;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--looper-muted);
     white-space: nowrap;
   }
 
@@ -502,9 +510,8 @@ const PRODUCT_CSS = `
       align-items: start;
     }
 
-    .looper-status {
-      text-align: right;
-      padding-top: 0.15rem;
+    .looper-ticket-main > .looper-status {
+      justify-self: end;
     }
   }
 
